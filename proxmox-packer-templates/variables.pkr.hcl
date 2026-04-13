@@ -65,7 +65,7 @@ variable "disk_size" {
 variable "disk_format" {
   description = "The drive's backing file's data format."
   type        = string
-  default     = "qcow2"
+  default     = "raw"
 }
 
 variable "disk_type" {
