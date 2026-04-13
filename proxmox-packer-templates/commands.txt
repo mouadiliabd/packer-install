@@ -1,0 +1,3 @@
+
+packer init config.pkr.hcl
+packer build -var-file="alpine-3.20.pkrvars.hcl" .

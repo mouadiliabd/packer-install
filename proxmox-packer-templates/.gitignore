@@ -1,0 +1,8 @@
+config.json
+my.pkrvars.hcl
+packer_cache/
+*.iso
+!Autounattend.iso
+packer.exe
+*.auto.pkrvars.hcl
+downloaded_iso_path/

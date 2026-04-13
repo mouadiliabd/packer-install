@@ -1,0 +1,62 @@
+name: Packer
+on:
+  workflow_call:
+    inputs:
+      name:
+        required: true
+        type: string
+      vm_id: 
+        required: true
+        type: number
+    secrets:
+      netbird_setup_key:
+        required: true
+      proxmox_host:
+        required: true
+      proxmox_user:
+        required: true
+      proxmox_password:
+        required: true
+concurrency:
+  group: ${{ inputs.vm_id }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Netbird Connect
+        uses: Alemiz112/netbird-connect@175ca0487002e6d4d96d16da5f4b91f639e8a765 #v1.0.1
+        with:
+          setup-key: ${{ secrets.netbird_setup_key }}
+      - name: Use Packer
+        uses: hashicorp-contrib/setup-packer@v3
+        with:
+          # renovate: githubReleaseVar repo=hashicorp/packer
+          packer-version: 1.15.1
+      - name: Install mkisofs
+        run: sudo apt update && sudo apt install -y mkisofs
+      - name: Build image from template
+        env:
+          PKR_VAR_proxmox_host: ${{ secrets.proxmox_host }}
+          PKR_VAR_proxmox_user: ${{ secrets.proxmox_user }}
+          PKR_VAR_proxmox_password: ${{ secrets.proxmox_password }}
+          PKR_VAR_node: proxmox
+          PKR_VAR_pool: templates
+          PKR_VAR_iso_storage_pool: local
+          PKR_VAR_disk_storage_pool: local-lvm
+          PKR_VAR_cloud_init_storage_pool: local-lvm
+          PKR_VAR_disk_format: raw
+          PKR_VAR_iso_download: "true"
+          PKR_VAR_iso_download_pve: "true"
+          PKR_VAR_vmid: ${{ inputs.vm_id }}
+          PKR_VAR_packer_http_interface: "wt0"
+          PACKER_KEY_INTERVAL: 100ms
+        run: |
+          packer init config.pkr.hcl
+          packer build -var-file="${{ inputs.name }}.pkrvars.hcl" -force .
+
+      - name: Netbird Disconnect
+        shell: bash
+        run: sudo netbird down
