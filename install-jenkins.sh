@@ -7,14 +7,18 @@ echo -e "${GREEN}=== Mise à jour du système ===${NC}"
 apt update && apt upgrade -y
 
 echo -e "${GREEN}=== Installation des dépendances ===${NC}"
-apt install -y curl wget gnupg jq unzip openssh-client python3-pip python3-venv
+apt install -y curl wget gnupg jq unzip openssh-client python3-pip python3-venv pipx
+
+# Initialiser pipx
+pipx ensurepath
+source ~/.bashrc 2>/dev/null || true
 
 # ---------------------- JENKINS ----------------------
 echo -e "${GREEN}=== Installation de Jenkins ===${NC}"
 rm -f /etc/apt/sources.list.d/jenkins.list /usr/share/keyrings/jenkins-keyring.* 2>/dev/null || true
 mkdir -p /etc/apt/keyrings
 
-# Importer la clé GPG de Jenkins (mise à jour pour 2026)
+# Importer la clé GPG de Jenkins
 wget -q -O /etc/apt/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
 
 # Ajouter le repository avec la clé correctement référencée
@@ -22,7 +26,7 @@ echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.
 
 apt update
 
-# Pour Debian 13, installer openjdk-21-jdk (plus complet que jre)
+# Pour Debian 13, installer openjdk-21-jdk
 apt install -y fontconfig openjdk-21-jdk jenkins
 
 # Configurer Jenkins pour utiliser Java 21 explicitement
@@ -37,7 +41,7 @@ echo -e "${YELLOW}Jenkins installé. Mot de passe : /var/lib/jenkins/secrets/ini
 # ---------------------- TERRAFORM ----------------------
 echo -e "${GREEN}=== Installation de Terraform ===${NC}"
 TERRAFORM_VERSION="1.7.5"
-# Vérifier si l'architecture est ARM64 (possible sur Debian 13)
+# Vérifier si l'architecture est ARM64
 ARCH=$(uname -m)
 if [ "$ARCH" = "aarch64" ]; then
     TERRAFORM_ARCH="arm64"
@@ -50,21 +54,16 @@ unzip -o "terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip"
 mv terraform /usr/local/bin/
 rm "terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip"
 
-# ---------------------- ANSIBLE (via pip avec venv) ----------------------
+# ---------------------- ANSIBLE (via pipx) ----------------------
 echo -e "${GREEN}=== Installation de Ansible ===${NC}"
-# Debian 13 préfère pipx ou venv pour les packages Python
-if command -v pipx &> /dev/null; then
-    pipx install --system-site-packages ansible
-    pipx ensurepath
-else
-    # Alternative avec venv
-    python3 -m venv /opt/ansible-venv
-    /opt/ansible-venv/bin/pip install --upgrade pip
-    /opt/ansible-venv/bin/pip install ansible
-    # Créer un lien symbolique pour un accès facile
-    ln -sf /opt/ansible-venv/bin/ansible /usr/local/bin/ansible
-    ln -sf /opt/ansible-venv/bin/ansible-playbook /usr/local/bin/ansible-playbook
-    ln -sf /opt/ansible-venv/bin/ansible-galaxy /usr/local/bin/ansible-galaxy
+# Installer ansible avec pipx
+pipx install --system-site-packages ansible
+
+# Créer des liens symboliques si nécessaire
+if [ -f "$HOME/.local/bin/ansible" ]; then
+    ln -sf "$HOME/.local/bin/ansible" /usr/local/bin/ansible
+    ln -sf "$HOME/.local/bin/ansible-playbook" /usr/local/bin/ansible-playbook
+    ln -sf "$HOME/.local/bin/ansible-galaxy" /usr/local/bin/ansible-galaxy
 fi
 
 # ---------------------- KUBECTL ----------------------
@@ -79,7 +78,7 @@ fi
 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${KUBECTL_ARCH}/kubectl"
 install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
 
-# ---------------------- HELM (optionnel mais utile pour k8s) ----------------------
+# ---------------------- HELM ----------------------
 echo -e "${GREEN}=== Installation de Helm ===${NC}"
 curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 chmod 700 get_helm.sh
@@ -99,14 +98,19 @@ if [ ! -f "$SSH_KEY_PATH" ]; then
     cat "${SSH_KEY_PATH}.pub"
 fi
 
-# ---------------------- CONFIGURATION SUPPLÉMENTAIRE POUR DEBIAN 13 ----------------------
+# ---------------------- CONFIGURATION SUPPLÉMENTAIRE ----------------------
 echo -e "${GREEN}=== Optimisations pour Debian 13 ===${NC}"
 
-# S'assurer que Jenkins a les bons droits sur /var/lib/jenkins
+# S'assurer que Jenkins a les bons droits
 chown -R jenkins:jenkins /var/lib/jenkins 2>/dev/null || true
 
-# Ajouter Jenkins au groupe sudo (optionnel, pour certaines tâches)
+# Ajouter Jenkins au groupe sudo (optionnel)
 usermod -aG sudo jenkins 2>/dev/null || true
+
+# Ajouter l'utilisateur courant au groupe jenkins pour faciliter l'accès
+if [ -n "${SUDO_USER:-}" ]; then
+    usermod -aG jenkins "$SUDO_USER" 2>/dev/null || true
+fi
 
 # Configurer le firewall si ufw est installé
 if command -v ufw &> /dev/null; then
@@ -115,20 +119,30 @@ if command -v ufw &> /dev/null; then
     echo -e "${YELLOW}Firewall configuré: port 8080 ouvert pour Jenkins${NC}"
 fi
 
-# Vérifier les versions installées
+# Ajouter /root/.local/bin au PATH pour pipx
+if ! grep -q 'export PATH="$PATH:$HOME/.local/bin"' ~/.bashrc 2>/dev/null; then
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+fi
+
+# ---------------------- VÉRIFICATION FINALE ----------------------
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Versions installées:${NC}"
 java --version 2>/dev/null | head -n1 || echo "Java non trouvé"
 echo "Terraform: $(terraform version 2>/dev/null | head -n1 || echo 'Non trouvé')"
 echo "kubectl: $(kubectl version --client 2>/dev/null | head -n1 || echo 'Non trouvé')"
 echo "Helm: $(helm version 2>/dev/null | head -n1 || echo 'Non trouvé')"
+
+# Vérifier Ansible
 if command -v ansible &> /dev/null; then
     echo "Ansible: $(ansible --version 2>/dev/null | head -n1)"
+elif [ -f "$HOME/.local/bin/ansible" ]; then
+    echo "Ansible: $($HOME/.local/bin/ansible --version 2>/dev/null | head -n1)"
 else
-    echo "Ansible installé dans /opt/ansible-venv"
+    echo "Ansible installé avec pipx, utilisez: pipx run ansible --version"
 fi
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Installation terminée !${NC}"
 echo "Mot de passe Jenkins : $(cat /var/lib/jenkins/secrets/initialAdminPassword 2>/dev/null || echo 'Non trouvé')"
 echo -e "${YELLOW}URL Jenkins: http://$(hostname -I | awk '{print $1}'):8080${NC}"
+echo -e "${YELLOW}Redémarrez votre session ou exécutez: source ~/.bashrc${NC}"
