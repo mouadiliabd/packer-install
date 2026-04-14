@@ -49,6 +49,40 @@ curl -sfL https://get.k3s.io | sh -s - \
     --disable=traefik \
     --disable=servicelb
 
+# Attendre que k3s soit complètement prêt
+echo -e "${YELLOW}Attente du démarrage de k3s...${NC}"
+sleep 10
+
+# Attendre que l'API server soit accessible
+echo "Vérification de l'API Kubernetes..."
+MAX_RETRIES=30
+RETRY_COUNT=0
+while ! kubectl get nodes &>/dev/null; do
+    RETRY_COUNT=$((RETRY_COUNT+1))
+    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+        echo -e "${YELLOW}Erreur: k3s n'a pas démarré après $MAX_RETRIES tentatives${NC}"
+        echo "Vérifiez les logs: journalctl -u k3s --no-pager -n 50"
+        exit 1
+    fi
+    echo "En attente de l'API Kubernetes... ($RETRY_COUNT/$MAX_RETRIES)"
+    sleep 5
+done
+
+# Attendre que le nœud soit Ready
+echo "Attente que le nœud soit prêt..."
+while [[ $(kubectl get nodes -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do
+    RETRY_COUNT=$((RETRY_COUNT+1))
+    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+        echo -e "${YELLOW}Erreur: Le nœud n'est pas devenu Ready${NC}"
+        exit 1
+    fi
+    echo "Nœud en cours d'initialisation... ($RETRY_COUNT/$MAX_RETRIES)"
+    sleep 5
+done
+
+echo -e "${GREEN}k3s installé avec succès !${NC}"
+kubectl get nodes -o wide
+
 # Configurer kubectl pour l'utilisateur courant
 mkdir -p $HOME/.kube
 cp /etc/rancher/k3s/k3s.yaml $HOME/.kube/config
@@ -59,17 +93,6 @@ mkdir -p /var/lib/jenkins/.kube
 cp /etc/rancher/k3s/k3s.yaml /var/lib/jenkins/.kube/config
 chown -R jenkins:jenkins /var/lib/jenkins/.kube
 chmod 600 /var/lib/jenkins/.kube/config
-
-# Attendre que k3s soit prêt
-echo -e "${YELLOW}Attente du démarrage de k3s...${NC}"
-sleep 10
-while ! kubectl get nodes &>/dev/null; do
-    echo "En attente de k3s..."
-    sleep 5
-done
-
-echo -e "${GREEN}k3s installé avec succès !${NC}"
-kubectl get nodes
 
 # ---------------------- TERRAFORM ----------------------
 echo -e "${GREEN}=== Installation de Terraform ===${NC}"
@@ -99,17 +122,6 @@ if [ -f "$HOME/.local/bin/ansible" ]; then
     ln -sf "$HOME/.local/bin/ansible-galaxy" /usr/local/bin/ansible-galaxy
 fi
 
-# ---------------------- KUBECTL (optionnel, k3s inclut déjà kubectl) ----------------------
-echo -e "${GREEN}=== Vérification de kubectl ===${NC}"
-# k3s installe déjà kubectl, on vérifie juste
-if command -v kubectl &> /dev/null; then
-    echo "kubectl est déjà disponible (via k3s)"
-else
-    # Installation manuelle si nécessaire
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${KUBECTL_ARCH}/kubectl"
-    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
-fi
-
 # ---------------------- HELM ----------------------
 echo -e "${GREEN}=== Installation de Helm ===${NC}"
 curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
@@ -130,12 +142,6 @@ if [ ! -f "$SSH_KEY_PATH" ]; then
     cat "${SSH_KEY_PATH}.pub"
 fi
 
-# ---------------------- INSTALLATION DE KUBECTL POUR JENKINS ----------------------
-echo -e "${GREEN}=== Configuration kubectl pour Jenkins ===${NC}"
-# S'assurer que Jenkins peut utiliser kubectl
-usermod -aG jenkins $USER 2>/dev/null || true
-chmod 644 /etc/rancher/k3s/k3s.yaml
-
 # ---------------------- CONFIGURATION SUPPLÉMENTAIRE ----------------------
 echo -e "${GREEN}=== Optimisations pour Debian 13 ===${NC}"
 
@@ -148,7 +154,6 @@ usermod -aG sudo jenkins 2>/dev/null || true
 # Ajouter l'utilisateur courant au groupe jenkins
 if [ -n "${SUDO_USER:-}" ]; then
     usermod -aG jenkins "$SUDO_USER" 2>/dev/null || true
-    usermod -aG docker "$SUDO_USER" 2>/dev/null || true
 fi
 
 # Configurer le firewall si ufw est installé
@@ -156,6 +161,7 @@ if command -v ufw &> /dev/null; then
     ufw allow 8080/tcp comment 'Jenkins web interface'
     ufw allow 6443/tcp comment 'k3s API server'
     ufw allow 22/tcp comment 'SSH'
+    ufw --force enable
     echo -e "${YELLOW}Firewall configuré: ports 8080 et 6443 ouverts${NC}"
 fi
 
@@ -164,8 +170,10 @@ if ! grep -q 'export PATH="$PATH:$HOME/.local/bin"' ~/.bashrc 2>/dev/null; then
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 fi
 
-# Créer un alias pour kubectl (optionnel)
-echo "alias k='kubectl'" >> ~/.bashrc 2>/dev/null || true
+# Créer un alias pour kubectl
+if ! grep -q "alias k=" ~/.bashrc 2>/dev/null; then
+    echo "alias k='kubectl'" >> ~/.bashrc
+fi
 
 # ---------------------- INFORMATIONS K3S ----------------------
 echo -e "${GREEN}========================================${NC}"
