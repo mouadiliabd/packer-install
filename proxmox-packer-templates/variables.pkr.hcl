@@ -59,7 +59,7 @@ variable "disk_storage_pool" {
 variable "disk_size" {
   description = "The size of the created disk."
   type        = string
-  default     = "5G"
+  default     = "20G"
 }
 
 variable "disk_format" {
