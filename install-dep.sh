@@ -7,7 +7,7 @@ echo -e "${GREEN}=== Mise à jour du système ===${NC}"
 apt update && apt upgrade -y
 
 echo -e "${GREEN}=== Installation des dépendances ===${NC}"
-apt install -y curl wget gnupg software-properties-common jq unzip openssh-client python3-pip
+apt install -y curl wget gnupg jq unzip openssh-client python3-pip
 
 # ---------------------- JENKINS ----------------------
 echo -e "${GREEN}=== Installation de Jenkins ===${NC}"
