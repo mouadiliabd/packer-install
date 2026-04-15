@@ -138,4 +138,14 @@ build {
       skip_clean      = true
     }
   }
+
+  dynamic "provisioner" {
+    for_each = length(var.windows_provisioner) > 0 ? [1] : []
+    labels   = ["powershell"]
+    content {
+      # Some finalization commands (e.g. Sysprep /shutdown) intentionally drop WinRM.
+      expect_disconnect = true
+      inline            = var.windows_provisioner
+    }
+  }
 }

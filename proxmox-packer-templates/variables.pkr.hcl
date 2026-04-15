@@ -359,6 +359,12 @@ variable "provisioner" {
   type        = list(string)
 }
 
+variable "windows_provisioner" {
+  description = "Windows PowerShell provisioner commands (e.g. sysprep) executed via WinRM."
+  type        = list(string)
+  default     = []
+}
+
 variable "packer_http_interface" {
   description = "Name of the network interface that Packer gets HTTPIP from. Defaults to the first non loopback interface."
   type        = string
